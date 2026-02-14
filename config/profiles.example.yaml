@@ -1,0 +1,13 @@
+default_profile: openai_default
+
+profiles:
+  openai_default:
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    default_model: gpt-4o-mini
+    timeout_seconds: 60
+    capabilities:
+      supports_text: true
+      supports_image: true
+      supports_video: false
+      supports_audio: false

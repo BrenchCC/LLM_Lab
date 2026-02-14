@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llm-lab"
+version = "0.1.0"
+description = "Single-entry LLM chat testing tool for OpenAI-compatible APIs."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "gradio>=5.0.0",
+    "openai>=1.55.0",
+    "pydantic>=2.10.0",
+    "rich>=13.9.0",
+    "tomli>=2.0.2",
+    "PyYAML>=6.0.2",
+    "streamlit>=1.40.0",
+    "python-dotenv>=1.0.1",
+    "opencv-python-headless>=4.10.0.84",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-mock>=3.14.0",
+]
+
+[project.scripts]
+llm-lab = "app.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "service", "utils"]
