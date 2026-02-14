@@ -150,25 +150,7 @@ llm-lab web --ui gradio --host 127.0.0.1 --port 7860
 | `/exit` | Exit |
 | `/quit` | Exit (alias of `/exit`) |
 
-## 8. Screenshot Placeholders
-
-Put screenshots into `assets/readme/`:
-
-- `cli-home.png`
-- `cli-help.png`
-- `cli-chat.png`
-- `web-streamlit.png`
-- `web-gradio.png`
-
-| Scene | Preview |
-|---|---|
-| CLI Home | ![CLI Home](assets/readme/cli-home.png) |
-| CLI Help | ![CLI Help](assets/readme/cli-help.png) |
-| CLI Chat | ![CLI Chat](assets/readme/cli-chat.png) |
-| Streamlit UI | ![Streamlit UI](assets/readme/web-streamlit.png) |
-| Gradio UI | ![Gradio UI](assets/readme/web-gradio.png) |
-
-## 9. Dependency Sync
+## 8. Dependency Sync
 
 This project uses dual dependency control:
 
@@ -181,7 +163,7 @@ Sync command:
 python scripts/sync_requirements.py
 ```
 
-## 10. FAQ
+## 9. FAQ
 
 | Issue | Solution |
 |---|---|
@@ -189,6 +171,6 @@ python scripts/sync_requirements.py
 | `Missing API key` | Ensure `.env` includes the env var referenced by `api_key_env` |
 | Video processing fails | Ensure `opencv-python-headless` is installed |
 
-## 11. License
+## 10. License
 
 This project is licensed under the `MIT License`. See `LICENSE` for details.

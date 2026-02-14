@@ -149,25 +149,7 @@ llm-lab web --ui gradio --host 127.0.0.1 --port 7860
 | `/exit` | 退出 |
 | `/quit` | 退出（同 `/exit`） |
 
-## 8. 界面预览占位
-
-将截图放到 `assets/readme/` 后，README 会自动展示：
-
-- `cli-home.png`
-- `cli-help.png`
-- `cli-chat.png`
-- `web-streamlit.png`
-- `web-gradio.png`
-
-| 场景 | 预览 |
-|---|---|
-| CLI 启动 | ![CLI Home](assets/readme/cli-home.png) |
-| CLI 帮助 | ![CLI Help](assets/readme/cli-help.png) |
-| CLI 对话 | ![CLI Chat](assets/readme/cli-chat.png) |
-| Streamlit 页面 | ![Streamlit UI](assets/readme/web-streamlit.png) |
-| Gradio 页面 | ![Gradio UI](assets/readme/web-gradio.png) |
-
-## 9. 依赖维护
+## 8. 依赖维护
 
 本项目采用双文件依赖管理：
 
@@ -180,7 +162,7 @@ llm-lab web --ui gradio --host 127.0.0.1 --port 7860
 python scripts/sync_requirements.py
 ```
 
-## 10. 常见问题
+## 9. 常见问题
 
 | 问题 | 解决方案 |
 |---|---|
@@ -188,6 +170,6 @@ python scripts/sync_requirements.py
 | `Missing API key` | 检查 `.env` 是否包含 `profiles.yaml` 所引用的 `api_key_env` |
 | 视频处理失败 | 确认 `opencv-python-headless` 已安装 |
 
-## 11. License
+## 10. License
 
 本项目使用 `MIT License`，详见 `LICENSE`。
