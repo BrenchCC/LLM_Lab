@@ -28,6 +28,9 @@ def write_profiles_file(
             "    base_url: https://api.example.com/v1\n"
             "    api_key_env: TEST_API_KEY\n"
             "    default_model: test-model\n"
+            "    models:\n"
+            "      - test-model\n"
+            "      - test-model-plus\n"
             "    model_aliases:\n"
             "      test-model: endpoint-001\n"
             "    timeout_seconds: 30\n"
@@ -188,12 +191,26 @@ def test_list_profile_models_returns_default_then_aliases_without_duplicates() -
         base_url = "https://api.example.com/v1",
         api_key_env = "TEST_API_KEY",
         default_model = "model-a",
+        models = ["model-a", "model-b", "model-c"],
         model_aliases = {
             "model-b": "endpoint-002",
             "model-a": "endpoint-001",
-            "model-c": "endpoint-003",
+            "model-d": "endpoint-003",
         },
     )
 
     models = list_profile_models(profile = profile)
-    assert models == ["model-a", "model-b", "model-c"]
+    assert models == ["model-a", "model-b", "model-c", "model-d"]
+
+
+def test_load_profiles_parses_models_list(tmp_path: Path) -> None:
+    """Verify `models` list can be loaded from profile YAML.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture path.
+    """
+    profiles_path = write_profiles_file(tmp_path = tmp_path)
+    registry = load_profiles(profiles_path = profiles_path)
+    profile = resolve_profile(registry = registry, cli_profile = "p1")
+
+    assert profile.models == ["test-model", "test-model-plus"]

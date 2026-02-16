@@ -89,6 +89,7 @@ class ProviderProfile:
         base_url: The base URL for OpenAI-compatible endpoint.
         api_key_env: The environment variable name containing API key.
         default_model: The default display model name for this profile.
+        models: Optional provider model candidate list for quick switching.
         model_aliases: Optional mapping from display model name to request model id.
         timeout_seconds: The HTTP timeout in seconds.
         capabilities: Explicit capability declaration from config if provided.
@@ -99,6 +100,7 @@ class ProviderProfile:
     base_url: str
     api_key_env: str
     default_model: str
+    models: list[str] = field(default_factory = list)
     model_aliases: dict[str, str] = field(default_factory = dict)
     timeout_seconds: int = 60
     capabilities: ModelCapabilities | None = None
@@ -180,6 +182,11 @@ def load_profiles(profiles_path: str) -> ProfileRegistry:
             base_url = str(profile_payload["base_url"]),
             api_key_env = str(profile_payload["api_key_env"]),
             default_model = str(profile_payload["default_model"]),
+            models = [
+                str(model_name).strip()
+                for model_name in (profile_payload.get("models") or [])
+                if str(model_name).strip()
+            ],
             model_aliases = {
                 str(key): str(value)
                 for key, value in (profile_payload.get("model_aliases") or {}).items()
@@ -277,6 +284,8 @@ def list_profile_models(profile: ProviderProfile) -> list[str]:
         ordered_models.append(normalized)
 
     push_model(profile.default_model)
+    for model_name in profile.models:
+        push_model(model_name)
     for alias_name in profile.model_aliases.keys():
         push_model(alias_name)
 

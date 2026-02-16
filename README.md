@@ -147,42 +147,69 @@ profiles:
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
     default_model: gpt-4o-mini
+    models:
+      - gpt-4o-mini
+      - gpt-4o
 
   dashscope_qwen:
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     api_key_env: DASHSCOPE_API_KEY
     default_model: qwen-max
+    models:
+      - qwen-max
+      - qwen-plus
     enable_deep_thinking: false
 
   kimi_moonshot:
     base_url: https://api.moonshot.cn/v1
     api_key_env: KIMI_API_KEY
     default_model: moonshot-v1-8k
+    models:
+      - moonshot-v1-8k
+      - moonshot-v1-32k
 
   volces_ark:
     base_url: https://ark.cn-beijing.volces.com/api/v3
     api_key_env: VOLCES_API_KEY
     default_model: Doubao-Seed-2.0-pro-260215
+    models:
+      - Doubao-Seed-2.0-pro-260215
+      - Kimi-K2-Thinking-251104
+      - DeepSeek-V3.2-251201
     model_aliases:
       Doubao-Seed-2.0-pro-260215: ep-your-endpoint-id
+      Kimi-K2-Thinking-251104: ep-your-endpoint-id-2
+      DeepSeek-V3.2-251201: ep-your-endpoint-id-3
 
   siliconflow_default:
     base_url: https://api.siliconflow.cn/v1
     api_key_env: SILICON_API_KEY
     default_model: Qwen/Qwen2.5-7B-Instruct
+    models:
+      - Qwen/Qwen2.5-7B-Instruct
+      - deepseek-ai/DeepSeek-V3
 
   deepseek_default:
     base_url: https://api.deepseek.com/v1
     api_key_env: DEEPSEEK_API_KEY
     default_model: deepseek-chat
+    models:
+      - deepseek-chat
+      - deepseek-reasoner
 
   glm_default:
     base_url: https://open.bigmodel.cn/api/paas/v4
     api_key_env: GLM_API_KEY
     default_model: glm-4-flash
+    models:
+      - glm-4-flash
+      - glm-4-plus
 ```
 
 > [!TIP]
+> `models` 用于给每个 Provider 提供可切换模型列表（Web/CLI 切换时会读取这个列表）。
+> 如果你有更多可用模型，直接继续追加到对应 Provider 的 `models`。
+>
 > `model_aliases` 用于“显示名 -> 实际请求模型 ID”映射。
 > 例如界面显示 `Doubao-Seed-2.0-pro-260215`，请求时自动使用 `ep-...` endpoint_id。
 >
