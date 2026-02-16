@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.console import Console
 from rich.markdown import Markdown
 
-from service.chat_service import ChatRequest, send_chat, stream_chat
+from service.chat_service import ChatRequest, send_chat, separate_reasoning_text, stream_chat
 from service.session_service import append_message, create_session, load_session
 from service.session_service import save_session as persist_session
 from utils.config_loader import ProfileRegistry, ProviderProfile
@@ -21,6 +21,7 @@ class CLIState:
         profile: Active provider profile.
         model: Active model name.
         stream: Whether stream mode is enabled.
+        thinking: Whether deep thinking mode is enabled.
         temperature: Current temperature value.
         top_p: Current top-p value.
         pending_images: Image list that will be attached to next message.
@@ -30,6 +31,7 @@ class CLIState:
     profile: ProviderProfile
     model: str
     stream: bool = False
+    thinking: bool = False
     temperature: float = 0.7
     top_p: float = 1.0
     pending_images: list[str] = field(default_factory = list)
@@ -43,6 +45,7 @@ COMMAND_SPECS: list[tuple[str, str]] = [
     ("/use <profile_id>", "Switch profile and reset model"),
     ("/model <model_name>", "Set active model"),
     ("/stream on|off", "Toggle stream output"),
+    ("/think on|off", "Toggle deep thinking mode"),
     ("/temp <float>", "Set temperature"),
     ("/top_p <float>", "Set top-p"),
     ("/image <path1,path2,...>", "Attach images for next turn only"),
@@ -81,6 +84,7 @@ def build_status_text(state: CLIState) -> str:
         f"[bold]profile[/]: {state.profile.profile_id}    "
         f"[bold]model[/]: {state.model}\n"
         f"[bold]stream[/]: {'on' if state.stream else 'off'}    "
+        f"[bold]thinking[/]: {'on' if state.thinking else 'off'}\n"
         f"[bold]temperature[/]: {state.temperature:.2f}    "
         f"[bold]top_p[/]: {state.top_p:.2f}\n"
         f"[bold]pending[/]: images={image_count}, videos={video_count}"
@@ -228,6 +232,7 @@ def render_error(console: Console, message: str) -> None:
 def render_assistant_message(
     console: Console,
     message: str,
+    reasoning_text: str,
     usage: dict[str, int],
 ) -> None:
     """Render non-stream assistant message panel.
@@ -235,8 +240,11 @@ def render_assistant_message(
     Args:
         console: Rich console instance.
         message: Assistant message content.
+        reasoning_text: Extracted reasoning text from model output.
         usage: Token usage payload.
     """
+    render_reasoning_panel(console = console, reasoning_text = reasoning_text)
+
     content = message.strip()
     body = Markdown(content) if content else "(empty response)"
     console.print(
@@ -256,22 +264,66 @@ def render_assistant_message(
         console.print(token_text)
 
 
+def render_reasoning_panel(console: Console, reasoning_text: str) -> None:
+    """Render reasoning panel when reasoning content exists.
+
+    Args:
+        console: Rich console instance.
+        reasoning_text: Extracted reasoning text from model output.
+    """
+    if not reasoning_text.strip():
+        return
+
+    reasoning_body = Markdown(reasoning_text.strip())
+    console.print(
+        Panel(
+            reasoning_body,
+            title = "Reasoning",
+            border_style = "yellow",
+            expand = True,
+        )
+    )
+
+
+def build_conversation_history_from_session(
+    session: dict,
+) -> list[dict[str, str]]:
+    """Build model conversation history from session payload.
+
+    Args:
+        session: Current session payload dictionary.
+    """
+    history: list[dict[str, str]] = []
+    for message in session.get("messages", []):
+        role = message.get("role", "")
+        content = message.get("content", "")
+        if role not in {"user", "assistant"}:
+            continue
+        if not isinstance(content, str):
+            continue
+        history.append({"role": role, "content": content})
+    return history
+
+
 def run_chat_turn(
     console: Console,
     state: CLIState,
     user_input: str,
-) -> tuple[str, dict[str, int], str | None]:
-    """Run one chat turn and return assistant text with usage.
+    conversation_history: list[dict[str, str]],
+) -> tuple[str, str, dict[str, int], list[str], str | None]:
+    """Run one chat turn and return answer, reasoning, usage, warnings, and error.
 
     Args:
         console: Rich console instance.
         state: Mutable CLI state object.
         user_input: User input text.
+        conversation_history: Previous user/assistant turns used as model context.
     """
     request = ChatRequest(
         user_text = user_input,
         image_paths = list(state.pending_images),
         video_paths = list(state.pending_videos),
+        conversation_history = conversation_history,
         stream = state.stream,
         temperature = state.temperature,
         top_p = state.top_p,
@@ -279,27 +331,40 @@ def run_chat_turn(
 
     if state.stream:
         chunks: list[str] = []
+        warning_messages: list[str] = []
         try:
             console.print("[bold green]assistant >[/] ", end = "")
             for chunk in stream_chat(
                 request = request,
                 profile = state.profile,
                 model = state.model,
+                warning_messages = warning_messages,
+                enable_deep_thinking = state.thinking,
             ):
                 console.print(chunk, end = "", markup = False, soft_wrap = True)
                 chunks.append(chunk)
             console.print("")
-            return "".join(chunks), {}, None
+            assistant_text, reasoning_text = separate_reasoning_text(
+                assistant_text = "".join(chunks),
+            )
+            return assistant_text, reasoning_text, {}, warning_messages, None
         except Exception as exc:
             console.print("")
-            return "", {}, str(exc)
+            return "", "", {}, [], str(exc)
 
     response = send_chat(
         request = request,
         profile = state.profile,
         model = state.model,
+        enable_deep_thinking = state.thinking,
     )
-    return response.assistant_text, response.usage, response.error_message
+    return (
+        response.assistant_text,
+        response.reasoning_text,
+        response.usage,
+        response.warning_messages,
+        response.error_message,
+    )
 
 
 def run_cli(
@@ -324,6 +389,7 @@ def run_cli(
         profile = initial_profile,
         model = initial_model,
         stream = initial_stream,
+        thinking = bool(initial_profile.enable_deep_thinking),
     )
     session = create_session(
         profile_id = state.profile.profile_id,
@@ -370,13 +436,17 @@ def run_cli(
                     continue
                 state.profile = registry.profiles[profile_id]
                 state.model = state.profile.default_model
+                state.thinking = bool(state.profile.enable_deep_thinking)
                 session = create_session(
                     profile_id = state.profile.profile_id,
                     model_name = state.model,
                 )
                 render_ok(
                     console = console,
-                    message = f"Switched profile to {profile_id}, model reset to {state.model}",
+                    message = (
+                        f"Switched profile to {profile_id}, model reset to {state.model}, "
+                        f"thinking={'on' if state.thinking else 'off'}"
+                    ),
                 )
                 render_status(console = console, state = state)
                 continue
@@ -386,8 +456,17 @@ def run_cli(
                     render_warn(console = console, message = "Usage: /model <model_name>")
                     continue
                 state.model = args[0]
-                session["model_name"] = state.model
-                render_ok(console = console, message = f"Active model: {state.model}")
+                session = create_session(
+                    profile_id = state.profile.profile_id,
+                    model_name = state.model,
+                )
+                state.pending_images = []
+                state.pending_videos = []
+                render_ok(
+                    console = console,
+                    message = f"Active model: {state.model}. Conversation reset.",
+                )
+                render_status(console = console, state = state)
                 continue
 
             if command == "/stream":
@@ -398,6 +477,17 @@ def run_cli(
                 render_ok(
                     console = console,
                     message = f"Stream mode: {'on' if state.stream else 'off'}",
+                )
+                continue
+
+            if command in {"/think", "/thinki", "/thinking"}:
+                if not args or args[0] not in {"on", "off"}:
+                    render_warn(console = console, message = "Usage: /think on|off")
+                    continue
+                state.thinking = args[0] == "on"
+                render_ok(
+                    console = console,
+                    message = f"Thinking mode: {'on' if state.thinking else 'off'}",
                 )
                 continue
 
@@ -499,6 +589,7 @@ def run_cli(
             )
             continue
 
+        conversation_history = build_conversation_history_from_session(session = session)
         append_message(
             session = session,
             role = "user",
@@ -508,10 +599,11 @@ def run_cli(
                 "videos": list(state.pending_videos),
             },
         )
-        assistant_text, usage, error_message = run_chat_turn(
+        assistant_text, reasoning_text, usage, warning_messages, error_message = run_chat_turn(
             console = console,
             state = state,
             user_input = user_input,
+            conversation_history = conversation_history,
         )
         if error_message:
             output_text = f"[ERROR] {error_message}"
@@ -523,17 +615,30 @@ def run_cli(
                 metadata = {},
             )
         else:
+            for warning_message in warning_messages:
+                render_warn(console = console, message = warning_message)
+
             if not state.stream:
                 render_assistant_message(
                     console = console,
                     message = assistant_text,
+                    reasoning_text = reasoning_text,
                     usage = usage,
+                )
+            elif reasoning_text.strip():
+                render_reasoning_panel(
+                    console = console,
+                    reasoning_text = reasoning_text,
                 )
             append_message(
                 session = session,
                 role = "assistant",
                 content = assistant_text,
-                metadata = {"usage": usage},
+                metadata = {
+                    "usage": usage,
+                    "reasoning": reasoning_text,
+                    "warnings": warning_messages,
+                },
             )
             if save_session_enabled:
                 persist_session(session = session)

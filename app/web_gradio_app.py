@@ -1,9 +1,13 @@
+import os
 import inspect
+import logging
 
-from service.chat_service import ChatRequest, send_chat
+from service.chat_service import ChatRequest, send_chat, separate_reasoning_text, stream_chat
 from service.session_service import append_message, create_session
 from service.session_service import save_session as persist_session
-from utils.config_loader import ProfileRegistry, ProviderProfile
+from utils.config_loader import ProfileRegistry, ProviderProfile, list_profile_models
+
+logger = logging.getLogger(__name__)
 
 
 GRADIO_CSS = """
@@ -72,7 +76,174 @@ button.primary {
 button.primary:hover {
   background: var(--teal-dark) !important;
 }
+
+.reasoning-loader {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.reasoning-loader .spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(15, 118, 110, 0.24);
+  border-top-color: var(--teal);
+  animation: spin .8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 """
+
+GRADIO_HEAD = """
+<script>
+(() => {
+  const INPUT_ROOT_ID = "llm-lab-chat-input";
+  const SEND_BUTTON_ROOT_ID = "llm-lab-send-btn";
+
+  function resolveTextarea() {
+    const inputRoot = document.getElementById(INPUT_ROOT_ID);
+    if (!inputRoot) {
+      return null;
+    }
+    if (inputRoot.tagName && inputRoot.tagName.toLowerCase() === "textarea") {
+      return inputRoot;
+    }
+    return inputRoot.querySelector("textarea");
+  }
+
+  function resolveSendButton() {
+    const buttonRoot = document.getElementById(SEND_BUTTON_ROOT_ID);
+    if (!buttonRoot) {
+      return null;
+    }
+    if (buttonRoot.tagName && buttonRoot.tagName.toLowerCase() === "button") {
+      return buttonRoot;
+    }
+    return buttonRoot.querySelector("button");
+  }
+
+  function bindEnterShortcut() {
+    const textarea = resolveTextarea();
+    const sendButton = resolveSendButton();
+    if (!textarea || !sendButton) {
+      return;
+    }
+    if (textarea.dataset.enterShortcutBound === "1") {
+      return;
+    }
+
+    textarea.dataset.enterShortcutBound = "1";
+    textarea.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      if (event.shiftKey || event.isComposing || event.keyCode === 229) {
+        return;
+      }
+      event.preventDefault();
+      sendButton.click();
+    });
+  }
+
+  bindEnterShortcut();
+  const observer = new MutationObserver(() => bindEnterShortcut());
+  observer.observe(document.body, {childList: true, subtree: true});
+})();
+</script>
+"""
+
+
+def _set_no_proxy_entries(host: str, port: int) -> None:
+    """Ensure local Gradio traffic bypasses system proxy.
+
+    Args:
+        host: Host used by Gradio server.
+        port: Port used by Gradio server.
+    """
+    raw_entries = os.getenv("NO_PROXY", "") or os.getenv("no_proxy", "")
+    current_entries = [item.strip() for item in raw_entries.split(",") if item.strip()]
+    merged_entries = set(current_entries)
+
+    candidates = {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        host.strip(),
+    }
+    for candidate in list(candidates):
+        if not candidate:
+            continue
+        merged_entries.add(candidate)
+        merged_entries.add(f"{candidate}:{port}")
+
+    normalized = ",".join(sorted(merged_entries))
+    os.environ["NO_PROXY"] = normalized
+    os.environ["no_proxy"] = normalized
+
+
+def prepare_gradio_runtime_env(host: str, port: int) -> None:
+    """Prepare runtime environment for stable Gradio startup.
+
+    Args:
+        host: Host used by Gradio server.
+        port: Port used by Gradio server.
+    """
+    _set_no_proxy_entries(host = host, port = port)
+    os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
+
+def launch_gradio_with_retry(demo, host: str, port: int, share: bool) -> None:
+    """Launch Gradio app with one localhost fallback retry for startup 502.
+
+    Args:
+        demo: Gradio Blocks app instance.
+        host: Preferred Gradio host.
+        port: Preferred Gradio port.
+        share: Whether to enable external share link.
+    """
+    queued_demo = demo.queue()
+    launch_kwargs = {
+        "server_name": host,
+        "server_port": port,
+        "share": share,
+    }
+    try:
+        queued_demo.launch(**launch_kwargs)
+        return
+    except Exception as exc:
+        error_text = str(exc)
+        startup_502 = "startup-events" in error_text and "502" in error_text
+        if not startup_502:
+            raise
+
+        fallback_host = ""
+        if host == "127.0.0.1":
+            fallback_host = "localhost"
+        elif host == "localhost":
+            fallback_host = "127.0.0.1"
+
+        if not fallback_host:
+            raise
+
+        prepare_gradio_runtime_env(host = fallback_host, port = port)
+        logger.warning(
+            "Gradio startup event check failed on %s:%s. Retrying with host=%s.",
+            host,
+            port,
+            fallback_host,
+        )
+        queued_demo.launch(
+            server_name = fallback_host,
+            server_port = port,
+            share = share,
+        )
 
 
 def normalize_uploaded_paths(raw_files) -> list[str]:
@@ -93,6 +264,7 @@ def build_status_text(
     model_name: str,
     image_count: int,
     video_count: int,
+    thinking_enabled: bool | None = None,
     total_tokens: int | None = None,
 ) -> str:
     """Build human-readable status summary.
@@ -102,14 +274,19 @@ def build_status_text(
         model_name: Active model name.
         image_count: Number of attached images in current turn.
         video_count: Number of attached videos in current turn.
+        thinking_enabled: Optional deep thinking switch state.
         total_tokens: Optional total token count from latest response.
     """
-    base_text = (
-        f"**Profile**: `{profile_id}` | "
-        f"**Model**: `{model_name}` | "
-        f"**Images**: {image_count} | "
-        f"**Videos**: {video_count}"
-    )
+    segments = [
+        f"**Profile**: `{profile_id}`",
+        f"**Model**: `{model_name}`",
+        f"**Images**: {image_count}",
+        f"**Videos**: {video_count}",
+    ]
+    if thinking_enabled is not None:
+        segments.append(f"**Thinking**: {'ON' if thinking_enabled else 'OFF'}")
+
+    base_text = " | ".join(segments)
     if total_tokens is not None:
         return f"{base_text} | **Total Tokens**: {total_tokens}"
     return base_text
@@ -138,6 +315,46 @@ def build_conversation_history_from_session(
             }
         )
     return history
+
+
+def build_assistant_display_text(
+    assistant_text: str,
+    reasoning_text: str,
+) -> str:
+    """Build assistant display content with optional reasoning section.
+
+    Args:
+        assistant_text: Final assistant answer text.
+        reasoning_text: Extracted reasoning text.
+    """
+    content = assistant_text.strip() if assistant_text else ""
+    reasoning = reasoning_text.strip() if reasoning_text else ""
+    if not content:
+        content = "(empty response)"
+    if not reasoning:
+        return content
+
+    safe_reasoning = reasoning.replace("```", "'''")
+    return (
+        f"{content}\n\n"
+        "<details><summary>Reasoning</summary>\n\n"
+        f"```text\n{safe_reasoning}\n```\n"
+        "</details>"
+    )
+
+
+def build_reasoning_loading_text() -> str:
+    """Build temporary assistant bubble shown while model is reasoning.
+
+    Args:
+        None: This function does not accept parameters.
+    """
+    return (
+        "<div class='reasoning-loader'>"
+        "<span class='spinner'></span>"
+        "<span>Reasoning...</span>"
+        "</div>"
+    )
 
 
 def build_gradio_theme(gr):
@@ -287,6 +504,7 @@ def run_gradio_app(
         save_session_enabled: Whether session persistence is enabled by default.
     """
     import gradio as gr
+    prepare_gradio_runtime_env(host = host, port = port)
 
     theme = build_gradio_theme(gr = gr)
     chatbot_format = "messages"
@@ -297,23 +515,102 @@ def run_gradio_app(
         model_name = model,
     )
 
-    def update_model(profile_id: str) -> str:
-        """Return default model when user switches profile.
+    def build_model_dropdown_options(
+        profile_id: str,
+        preferred_model: str = "",
+    ) -> list[str]:
+        """Build model preset choices for selected provider.
+
+        Args:
+            profile_id: Selected profile id.
+            preferred_model: Optional model that should be pinned in choices.
+        """
+        selected_profile = registry.profiles[profile_id]
+        options = list_profile_models(profile = selected_profile)
+        normalized_preferred = preferred_model.strip()
+
+        if normalized_preferred and normalized_preferred not in options:
+            options = [normalized_preferred] + options
+        if not options and selected_profile.default_model:
+            options = [selected_profile.default_model]
+        return options
+
+    def resolve_effective_model_name(
+        profile_id: str,
+        model_preset: str,
+        custom_model: str,
+    ) -> str:
+        """Resolve final model name from preset and optional custom override.
+
+        Args:
+            profile_id: Active profile id from UI.
+            model_preset: Selected preset model from dropdown.
+            custom_model: Custom model text from input.
+        """
+        custom_value = custom_model.strip() if isinstance(custom_model, str) else ""
+        if custom_value:
+            return custom_value
+
+        preset_value = model_preset.strip() if isinstance(model_preset, str) else ""
+        if preset_value:
+            return preset_value
+        return registry.profiles[profile_id].default_model
+
+    def update_model_controls(profile_id: str):
+        """Update model controls when user switches provider.
 
         Args:
             profile_id: Selected profile id.
         """
-        return registry.profiles[profile_id].default_model
+        nonlocal active_session
+        selected_profile = registry.profiles[profile_id]
+        model_options = build_model_dropdown_options(
+            profile_id = profile_id,
+            preferred_model = selected_profile.default_model,
+        )
+        active_session = create_session(
+            profile_id = profile_id,
+            model_name = selected_profile.default_model,
+        )
+        empty_history = messages_to_chatbot_history(
+            messages = [],
+            chatbot_format = chatbot_format,
+        )
+        status_text = build_status_text(
+            profile_id = profile_id,
+            model_name = selected_profile.default_model,
+            image_count = 0,
+            video_count = 0,
+            thinking_enabled = bool(selected_profile.enable_deep_thinking),
+        )
+        return (
+            gr.update(
+                choices = model_options,
+                value = selected_profile.default_model,
+            ),
+            "",
+            bool(selected_profile.enable_deep_thinking),
+            empty_history,
+            status_text,
+        )
+
+    initial_model_options = build_model_dropdown_options(
+        profile_id = profile.profile_id,
+        preferred_model = model,
+    )
 
     def run_turn(
         user_message: str,
         history,
         profile_id: str,
-        model_name: str,
+        model_preset: str,
+        custom_model: str,
         image_files,
         video_file,
         temperature: float,
         top_p: float,
+        thinking_enabled: bool,
+        stream_enabled: bool,
         save_enabled: bool,
     ):
         """Run one Gradio chat turn.
@@ -322,15 +619,23 @@ def run_gradio_app(
             user_message: User input text.
             history: Existing chatbot history.
             profile_id: Active profile id from UI.
-            model_name: Active model name from UI.
+            model_preset: Selected preset model from dropdown.
+            custom_model: Optional custom model text from input.
             image_files: Uploaded image payload.
             video_file: Uploaded video payload.
             temperature: Current temperature value.
             top_p: Current top-p value.
+            thinking_enabled: Whether deep thinking mode is enabled.
+            stream_enabled: Whether stream output is enabled.
             save_enabled: Save switch in current UI.
         """
         nonlocal active_session
 
+        effective_model_name = resolve_effective_model_name(
+            profile_id = profile_id,
+            model_preset = model_preset,
+            custom_model = custom_model,
+        )
         local_messages = history_to_messages(history = history)
         if not user_message:
             local_history = messages_to_chatbot_history(
@@ -339,20 +644,22 @@ def run_gradio_app(
             )
             status_text = build_status_text(
                 profile_id = profile_id,
-                model_name = model_name,
+                model_name = effective_model_name,
                 image_count = 0,
                 video_count = 0,
+                thinking_enabled = thinking_enabled,
             )
-            return local_history, "", status_text
+            yield local_history, "", status_text
+            return
 
         selected_profile = registry.profiles[profile_id]
         if (
             active_session.get("profile_id") != profile_id
-            or active_session.get("model_name") != model_name
+            or active_session.get("model_name") != effective_model_name
         ):
             active_session = create_session(
                 profile_id = profile_id,
-                model_name = model_name,
+                model_name = effective_model_name,
             )
 
         conversation_history = build_conversation_history_from_session(
@@ -375,58 +682,155 @@ def run_gradio_app(
             conversation_history = conversation_history,
             temperature = temperature,
             top_p = top_p,
-            stream = False,
+            stream = stream_enabled,
         )
-        response = send_chat(
-            request = request,
-            profile = selected_profile,
-            model = model_name,
-        )
-        assistant_text = response.assistant_text or f"[ERROR] {response.error_message}"
+
         local_messages.append({"role": "user", "content": user_message})
-        local_messages.append({"role": "assistant", "content": assistant_text})
+        local_messages.append(
+            {
+                "role": "assistant",
+                "content": build_reasoning_loading_text(),
+            }
+        )
+        pending_history = messages_to_chatbot_history(
+            messages = local_messages,
+            chatbot_format = chatbot_format,
+        )
+        base_status = build_status_text(
+            profile_id = profile_id,
+            model_name = effective_model_name,
+            image_count = len(image_paths),
+            video_count = len(video_paths),
+            thinking_enabled = thinking_enabled,
+        )
+        pending_status = f"{base_status} | **Status**: Reasoning..."
+        yield pending_history, "", pending_status
+        usage: dict[str, int] = {}
+        reasoning_text = ""
+        assistant_text = ""
+        assistant_display_text = ""
+        warning_messages: list[str] = []
+
+        if stream_enabled:
+            chunk_text = ""
+            try:
+                for chunk in stream_chat(
+                    request = request,
+                    profile = selected_profile,
+                    model = effective_model_name,
+                    warning_messages = warning_messages,
+                    enable_deep_thinking = thinking_enabled,
+                ):
+                    chunk_text += chunk
+                    partial_answer, _ = separate_reasoning_text(
+                        assistant_text = chunk_text,
+                    )
+                    local_messages[-1] = {
+                        "role": "assistant",
+                        "content": partial_answer if partial_answer.strip() else build_reasoning_loading_text(),
+                    }
+                    partial_history = messages_to_chatbot_history(
+                        messages = local_messages,
+                        chatbot_format = chatbot_format,
+                    )
+                    yield partial_history, "", f"{base_status} | **Status**: Streaming..."
+
+                assistant_text, reasoning_text = separate_reasoning_text(
+                    assistant_text = chunk_text,
+                )
+                assistant_display_text = build_assistant_display_text(
+                    assistant_text = assistant_text,
+                    reasoning_text = reasoning_text,
+                )
+            except Exception as exc:
+                assistant_text = f"[ERROR] {exc}"
+                reasoning_text = ""
+                assistant_display_text = assistant_text
+        else:
+            response = send_chat(
+                request = request,
+                profile = selected_profile,
+                model = effective_model_name,
+                enable_deep_thinking = thinking_enabled,
+            )
+            assistant_text = response.assistant_text
+            if response.error_message:
+                assistant_text = f"[ERROR] {response.error_message}"
+                reasoning_text = ""
+            else:
+                reasoning_text = response.reasoning_text
+            usage = response.usage
+            warning_messages = response.warning_messages
+            assistant_display_text = build_assistant_display_text(
+                assistant_text = assistant_text,
+                reasoning_text = reasoning_text,
+            )
+
+        local_messages[-1] = {"role": "assistant", "content": assistant_display_text}
         local_history = messages_to_chatbot_history(
             messages = local_messages,
             chatbot_format = chatbot_format,
         )
 
-        total_tokens = response.usage.get("total_tokens")
+        total_tokens = usage.get("total_tokens")
         append_message(
             session = active_session,
             role = "assistant",
             content = assistant_text,
-            metadata = {"usage": response.usage},
+            metadata = {
+                "usage": usage,
+                "reasoning": reasoning_text,
+                "warnings": warning_messages,
+            },
         )
         if save_session_enabled or save_enabled:
             persist_session(session = active_session)
 
         status_text = build_status_text(
             profile_id = profile_id,
-            model_name = model_name,
+            model_name = effective_model_name,
             image_count = len(image_paths),
             video_count = len(video_paths),
+            thinking_enabled = thinking_enabled,
             total_tokens = total_tokens,
         )
+        if warning_messages:
+            warnings_text = " | ".join(warning_messages)
+            status_text = f"{status_text}\n\n**Warning**: {warnings_text}"
 
-        return local_history, "", status_text
+        yield local_history, "", status_text
+        return
 
-    def clear_chat(profile_id: str, model_name: str):
+    def clear_chat(
+        profile_id: str,
+        model_preset: str,
+        custom_model: str,
+        thinking_enabled: bool,
+    ):
         """Reset active chat session and clear conversation panel.
 
         Args:
             profile_id: Active profile id from UI.
-            model_name: Active model name from UI.
+            model_preset: Selected preset model from dropdown.
+            custom_model: Optional custom model text from input.
+            thinking_enabled: Whether deep thinking mode is enabled.
         """
         nonlocal active_session
+        effective_model_name = resolve_effective_model_name(
+            profile_id = profile_id,
+            model_preset = model_preset,
+            custom_model = custom_model,
+        )
         active_session = create_session(
             profile_id = profile_id,
-            model_name = model_name,
+            model_name = effective_model_name,
         )
         status_text = build_status_text(
             profile_id = profile_id,
-            model_name = model_name,
+            model_name = effective_model_name,
             image_count = 0,
             video_count = 0,
+            thinking_enabled = thinking_enabled,
         )
         empty_history = messages_to_chatbot_history(
             messages = [],
@@ -439,11 +843,13 @@ def run_gradio_app(
         model_name = model,
         image_count = 0,
         video_count = 0,
+        thinking_enabled = bool(profile.enable_deep_thinking),
     )
 
     blocks_kwargs = {
         "title": "llm-lab Gradio UI",
         "css": GRADIO_CSS,
+        "head": GRADIO_HEAD,
     }
     if theme is not None:
         blocks_kwargs["theme"] = theme
@@ -466,11 +872,20 @@ def run_gradio_app(
             with gr.Column(scale = 3, elem_classes = ["control-panel"]):
                 gr.Markdown("### Control Center")
                 profile_dropdown = gr.Dropdown(
-                    label = "Profile",
+                    label = "Model Provider",
                     choices = profile_options,
                     value = profile.profile_id,
                 )
-                model_input = gr.Textbox(label = "Model", value = model)
+                model_preset_dropdown = gr.Dropdown(
+                    label = "Model",
+                    choices = initial_model_options,
+                    value = model,
+                )
+                custom_model_input = gr.Textbox(
+                    label = "Custom model (optional)",
+                    value = "",
+                    placeholder = "Leave empty to use selected preset model",
+                )
                 image_files = gr.Files(
                     label = "Images",
                     file_count = "multiple",
@@ -479,6 +894,11 @@ def run_gradio_app(
                 video_file = gr.File(label = "Video", type = "filepath")
                 temperature = gr.Slider(label = "Temperature", minimum = 0.0, maximum = 2.0, value = 0.7, step = 0.1)
                 top_p = gr.Slider(label = "Top-p", minimum = 0.1, maximum = 1.0, value = 1.0, step = 0.1)
+                thinking_enabled = gr.Checkbox(
+                    label = "Thinking",
+                    value = bool(profile.enable_deep_thinking),
+                )
+                stream_enabled = gr.Checkbox(label = "Stream response", value = False)
                 save_enabled = gr.Checkbox(label = "Save session", value = save_session_enabled)
 
             with gr.Column(scale = 7, elem_classes = ["chat-panel"]):
@@ -486,17 +906,32 @@ def run_gradio_app(
                 chatbot, chatbot_format = build_chatbot_component(gr = gr)
                 user_input = gr.Textbox(
                     label = "Message",
-                    placeholder = "Type your prompt and press Enter",
-                    lines = 2,
+                    placeholder = "Type your prompt. Enter to send, Shift+Enter for newline",
+                    lines = 3,
+                    elem_id = "llm-lab-chat-input",
                 )
                 with gr.Row():
-                    send_button = gr.Button("Send", variant = "primary")
+                    send_button = gr.Button(
+                        "Send",
+                        variant = "primary",
+                        elem_id = "llm-lab-send-btn",
+                    )
                     clear_button = gr.Button("Clear Chat")
 
         profile_dropdown.change(
-            fn = update_model,
+            fn = update_model_controls,
             inputs = [profile_dropdown],
-            outputs = [model_input],
+            outputs = [model_preset_dropdown, custom_model_input, thinking_enabled, chatbot, status_box],
+        )
+        model_preset_dropdown.change(
+            fn = clear_chat,
+            inputs = [profile_dropdown, model_preset_dropdown, custom_model_input, thinking_enabled],
+            outputs = [chatbot, status_box],
+        )
+        custom_model_input.change(
+            fn = clear_chat,
+            inputs = [profile_dropdown, model_preset_dropdown, custom_model_input, thinking_enabled],
+            outputs = [chatbot, status_box],
         )
         send_button.click(
             fn = run_turn,
@@ -504,38 +939,27 @@ def run_gradio_app(
                 user_input,
                 chatbot,
                 profile_dropdown,
-                model_input,
+                model_preset_dropdown,
+                custom_model_input,
                 image_files,
                 video_file,
                 temperature,
                 top_p,
-                save_enabled,
-            ],
-            outputs = [chatbot, user_input, status_box],
-        )
-        user_input.submit(
-            fn = run_turn,
-            inputs = [
-                user_input,
-                chatbot,
-                profile_dropdown,
-                model_input,
-                image_files,
-                video_file,
-                temperature,
-                top_p,
+                thinking_enabled,
+                stream_enabled,
                 save_enabled,
             ],
             outputs = [chatbot, user_input, status_box],
         )
         clear_button.click(
             fn = clear_chat,
-            inputs = [profile_dropdown, model_input],
+            inputs = [profile_dropdown, model_preset_dropdown, custom_model_input, thinking_enabled],
             outputs = [chatbot, status_box],
         )
 
-    demo.queue().launch(
-        server_name = host,
-        server_port = port,
+    launch_gradio_with_retry(
+        demo = demo,
+        host = host,
+        port = port,
         share = share,
     )

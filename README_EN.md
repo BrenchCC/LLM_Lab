@@ -153,6 +153,7 @@ profiles:
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     api_key_env: DASHSCOPE_API_KEY
     default_model: qwen-max
+    enable_deep_thinking: false
 
   kimi_moonshot:
     base_url: https://api.moonshot.cn/v1
@@ -162,7 +163,9 @@ profiles:
   volces_ark:
     base_url: https://ark.cn-beijing.volces.com/api/v3
     api_key_env: VOLCES_API_KEY
-    default_model: ep-your-model-id
+    default_model: Doubao-Seed-2.0-pro-260215
+    model_aliases:
+      Doubao-Seed-2.0-pro-260215: ep-your-endpoint-id
 
   siliconflow_default:
     base_url: https://api.siliconflow.cn/v1
@@ -180,11 +183,22 @@ profiles:
     default_model: glm-4-flash
 ```
 
+> [!TIP]
+> Use `model_aliases` for "display name -> actual request model id" mapping.
+> Example: show `Doubao-Seed-2.0-pro-260215` in UI while sending `ep-...` endpoint_id in API calls.
+>
+> Use `enable_deep_thinking` to control deep-thinking mode. If set to `true` but the current model
+> does not support it, the app warns and automatically falls back to normal mode.
+
 ### 5.3 Configuration Priority
 
 1. **CLI arguments** (Highest)
 2. **.env file** (Medium)
 3. **profiles.yaml defaults** (Lowest)
+
+> [!NOTE]
+> If you explicitly pass `--profile` without `--model`, the app uses that profile's
+> `default_model` from `profiles.yaml` to avoid being overridden by global `LLM_LAB_MODEL` in `.env`.
 
 ---
 
@@ -215,7 +229,10 @@ llm-lab chat --save-session
 ### WebUI Mode
 
 ```bash
-# Streamlit interface (default port 8501)
+# Streamlit by default (default port 8501)
+llm-lab web --host 127.0.0.1 --port 8501
+
+# Explicitly choose Streamlit
 llm-lab web --ui streamlit --host 127.0.0.1 --port 8501
 
 # Gradio interface (default port 7860)
@@ -234,6 +251,7 @@ llm-lab web --ui gradio --host 127.0.0.1 --port 7860
 | `/use <profile>` | Switch profile | `/use dashscope_qwen` |
 | `/model <model>` | Switch model | `/model qwen-max` |
 | `/stream <on/off>` | Toggle streaming | `/stream on` |
+| `/think <on/off>` | Toggle thinking mode | `/think on` |
 | `/temp <float>` | Set temperature | `/temp 0.7` |
 | `/top_p <float>` | Set top-p | `/top_p 0.9` |
 | `/image <path>` | Attach image(s) | `/image /path/to/image.jpg` |

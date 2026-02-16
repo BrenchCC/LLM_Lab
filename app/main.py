@@ -47,7 +47,8 @@ def parse_args() -> argparse.Namespace:
         "--ui",
         type = str,
         choices = ["streamlit", "gradio"],
-        required = True,
+        default = "streamlit",
+        help = "Web UI type (default: streamlit).",
     )
     web_parser.add_argument("--host", type = str, default = "127.0.0.1")
     web_parser.add_argument("--port", type = int, default = None)
@@ -70,7 +71,11 @@ def main() -> int:
         profiles_path = resolve_profiles_path(cli_profiles_path = args.profiles_path)
         registry = load_profiles(profiles_path = profiles_path)
         profile = resolve_profile(registry = registry, cli_profile = args.profile)
-        model = resolve_model(profile = profile, cli_model = args.model)
+        model = resolve_model(
+            profile = profile,
+            cli_model = args.model,
+            prefer_profile_default = bool(args.profile),
+        )
     except Exception as exc:
         logger.error("Startup configuration failed: %s", exc)
         return 1
@@ -110,4 +115,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

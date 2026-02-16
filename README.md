@@ -152,6 +152,7 @@ profiles:
     base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
     api_key_env: DASHSCOPE_API_KEY
     default_model: qwen-max
+    enable_deep_thinking: false
 
   kimi_moonshot:
     base_url: https://api.moonshot.cn/v1
@@ -161,7 +162,9 @@ profiles:
   volces_ark:
     base_url: https://ark.cn-beijing.volces.com/api/v3
     api_key_env: VOLCES_API_KEY
-    default_model: ep-your-model-id
+    default_model: Doubao-Seed-2.0-pro-260215
+    model_aliases:
+      Doubao-Seed-2.0-pro-260215: ep-your-endpoint-id
 
   siliconflow_default:
     base_url: https://api.siliconflow.cn/v1
@@ -179,11 +182,22 @@ profiles:
     default_model: glm-4-flash
 ```
 
+> [!TIP]
+> `model_aliases` 用于“显示名 -> 实际请求模型 ID”映射。
+> 例如界面显示 `Doubao-Seed-2.0-pro-260215`，请求时自动使用 `ep-...` endpoint_id。
+>
+> `enable_deep_thinking` 用于控制是否启用深度思考模式。若配置为 `true` 但当前模型不支持，
+> 程序会给出 warning，并自动回退到普通模式继续执行。
+
 ### 5.3 配置优先级
 
 1. **命令行参数**（最高）
 2. **.env 文件**（中间）
 3. **profiles.yaml 默认值**（最低）
+
+> [!NOTE]
+> 当你显式传入 `--profile` 但未传 `--model` 时，会优先使用该 Profile 在
+> `profiles.yaml` 中的 `default_model`，避免被 `.env` 里的全局 `LLM_LAB_MODEL` 覆盖。
 
 ---
 
@@ -214,7 +228,10 @@ llm-lab chat --save-session
 ### WebUI 模式
 
 ```bash
-# Streamlit 界面（默认 8501 端口）
+# 默认启动 Streamlit（默认 8501 端口）
+llm-lab web --host 127.0.0.1 --port 8501
+
+# 显式指定 Streamlit
 llm-lab web --ui streamlit --host 127.0.0.1 --port 8501
 
 # Gradio 界面（默认 7860 端口）
@@ -233,6 +250,7 @@ llm-lab web --ui gradio --host 127.0.0.1 --port 7860
 | `/use <profile>` | 切换 Profile | `/use dashscope_qwen` |
 | `/model <model>` | 切换模型 | `/model qwen-max` |
 | `/stream <on/off>` | 设置流式输出 | `/stream on` |
+| `/think <on/off>` | 设置 thinking 模式 | `/think on` |
 | `/temp <float>` | 设置温度参数 | `/temp 0.7` |
 | `/top_p <float>` | 设置 top-p 参数 | `/top_p 0.9` |
 | `/image <path>` | 附加图片 | `/image /path/to/image.jpg` |

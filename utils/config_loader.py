@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -88,17 +88,21 @@ class ProviderProfile:
         profile_id: The unique profile identifier.
         base_url: The base URL for OpenAI-compatible endpoint.
         api_key_env: The environment variable name containing API key.
-        default_model: The default model name for this profile.
+        default_model: The default display model name for this profile.
+        model_aliases: Optional mapping from display model name to request model id.
         timeout_seconds: The HTTP timeout in seconds.
         capabilities: Explicit capability declaration from config if provided.
+        enable_deep_thinking: Whether to request deep thinking mode when possible.
     """
 
     profile_id: str
     base_url: str
     api_key_env: str
     default_model: str
+    model_aliases: dict[str, str] = field(default_factory = dict)
     timeout_seconds: int = 60
     capabilities: ModelCapabilities | None = None
+    enable_deep_thinking: bool = False
 
 
 @dataclass
@@ -176,8 +180,13 @@ def load_profiles(profiles_path: str) -> ProfileRegistry:
             base_url = str(profile_payload["base_url"]),
             api_key_env = str(profile_payload["api_key_env"]),
             default_model = str(profile_payload["default_model"]),
+            model_aliases = {
+                str(key): str(value)
+                for key, value in (profile_payload.get("model_aliases") or {}).items()
+            },
             timeout_seconds = int(profile_payload.get("timeout_seconds", 60)),
             capabilities = capabilities,
+            enable_deep_thinking = bool(profile_payload.get("enable_deep_thinking", False)),
         )
 
     default_profile_id = str(raw_config.get("default_profile") or "")
@@ -211,14 +220,64 @@ def resolve_profile(
     return registry.profiles[profile_id]
 
 
-def resolve_model(profile: ProviderProfile, cli_model = None) -> str:
+def resolve_model(
+    profile: ProviderProfile,
+    cli_model = None,
+    prefer_profile_default: bool = False,
+) -> str:
     """Resolve model name with command-line precedence.
 
     Args:
         profile: The selected provider profile.
         cli_model: Optional model name from command line.
+        prefer_profile_default: Whether profile default should win over env model.
     """
-    model = cli_model or os.getenv("LLM_LAB_MODEL") or profile.default_model
+    if cli_model:
+        model = cli_model
+    elif prefer_profile_default:
+        model = profile.default_model or os.getenv("LLM_LAB_MODEL")
+    else:
+        model = os.getenv("LLM_LAB_MODEL") or profile.default_model
     if not model:
         raise ValueError(f"No model resolved for profile `{profile.profile_id}`")
     return model
+
+
+def resolve_request_model(profile: ProviderProfile, model_name: str) -> str:
+    """Resolve provider request model id from a display model name.
+
+    Args:
+        profile: The selected provider profile.
+        model_name: Display model name from CLI or UI.
+    """
+    if not model_name:
+        return model_name
+    return profile.model_aliases.get(model_name, model_name)
+
+
+def list_profile_models(profile: ProviderProfile) -> list[str]:
+    """List visible model options for one provider profile.
+
+    Args:
+        profile: The selected provider profile.
+    """
+    ordered_models: list[str] = []
+    seen: set[str] = set()
+
+    def push_model(model_name: str) -> None:
+        """Push one model option into ordered list without duplicates.
+
+        Args:
+            model_name: Candidate model display name.
+        """
+        normalized = model_name.strip()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        ordered_models.append(normalized)
+
+    push_model(profile.default_model)
+    for alias_name in profile.model_aliases.keys():
+        push_model(alias_name)
+
+    return ordered_models

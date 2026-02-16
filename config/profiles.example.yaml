@@ -6,6 +6,7 @@ profiles:
     api_key_env: OPENAI_API_KEY
     default_model: gpt-4o-mini
     timeout_seconds: 60
+    enable_deep_thinking: false
     capabilities:
       supports_text: true
       supports_image: true
@@ -17,6 +18,7 @@ profiles:
     api_key_env: DASHSCOPE_API_KEY
     default_model: qwen-max
     timeout_seconds: 60
+    enable_deep_thinking: false
     capabilities:
       supports_text: true
       supports_image: true
@@ -28,6 +30,7 @@ profiles:
     api_key_env: KIMI_API_KEY
     default_model: moonshot-v1-8k
     timeout_seconds: 60
+    enable_deep_thinking: false
     capabilities:
       supports_text: true
       supports_image: true
@@ -37,8 +40,11 @@ profiles:
   volces_ark:
     base_url: https://ark.cn-beijing.volces.com/api/v3
     api_key_env: VOLCES_API_KEY
-    default_model: ep-your-model-id
+    default_model: Doubao-Seed-2.0-pro-260215
+    model_aliases:
+      Doubao-Seed-2.0-pro-260215: ep-your-endpoint-id
     timeout_seconds: 60
+    enable_deep_thinking: false
     capabilities:
       supports_text: true
       supports_image: true
@@ -50,6 +56,7 @@ profiles:
     api_key_env: SILICON_API_KEY
     default_model: Qwen/Qwen2.5-7B-Instruct
     timeout_seconds: 60
+    enable_deep_thinking: false
     capabilities:
       supports_text: true
       supports_image: true
@@ -61,6 +68,7 @@ profiles:
     api_key_env: DEEPSEEK_API_KEY
     default_model: deepseek-chat
     timeout_seconds: 60
+    enable_deep_thinking: false
     capabilities:
       supports_text: true
       supports_image: false
@@ -72,6 +80,7 @@ profiles:
     api_key_env: GLM_API_KEY
     default_model: glm-4-flash
     timeout_seconds: 60
+    enable_deep_thinking: false
     capabilities:
       supports_text: true
       supports_image: true

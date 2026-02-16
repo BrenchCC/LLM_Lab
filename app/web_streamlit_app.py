@@ -1,10 +1,11 @@
 import argparse
+import html
 import tempfile
 from pathlib import Path
 
-from service.chat_service import ChatRequest, send_chat, stream_chat
+from service.chat_service import ChatRequest, send_chat, separate_reasoning_text, stream_chat
 from service.session_service import append_message, create_session, save_session
-from utils.config_loader import load_env_file, load_profiles, resolve_model
+from utils.config_loader import list_profile_models, load_env_file, load_profiles, resolve_model
 from utils.config_loader import resolve_profile
 
 
@@ -176,6 +177,7 @@ def render_runtime_pills(
     profile_id: str,
     model_name: str,
     stream_mode: bool,
+    thinking_enabled: bool,
     temperature: float,
     top_p: float,
 ) -> None:
@@ -186,16 +188,19 @@ def render_runtime_pills(
         profile_id: Current selected profile id.
         model_name: Current selected model name.
         stream_mode: Whether stream mode is enabled.
+        thinking_enabled: Whether deep thinking mode is enabled.
         temperature: Active temperature value.
         top_p: Active top-p value.
     """
     stream_text = "ON" if stream_mode else "OFF"
+    thinking_text = "ON" if thinking_enabled else "OFF"
     st.markdown(
         f"""
         <div class="stat-pill-wrap">
           <div class="stat-pill"><b>Profile</b>: {profile_id}</div>
           <div class="stat-pill"><b>Model</b>: {model_name}</div>
           <div class="stat-pill"><b>Stream</b>: {stream_text}</div>
+          <div class="stat-pill"><b>Thinking</b>: {thinking_text}</div>
           <div class="stat-pill"><b>Temp</b>: {temperature:.2f}</div>
           <div class="stat-pill"><b>Top-p</b>: {top_p:.2f}</div>
         </div>
@@ -243,6 +248,7 @@ def ensure_streamlit_state(profile_id: str, model_name: str) -> None:
             model_name = model_name,
         )
         st.session_state.messages = []
+        st.session_state.last_usage = {}
 
 
 def render_usage_card(st, usage: dict[str, int]) -> None:
@@ -264,6 +270,29 @@ def render_usage_card(st, usage: dict[str, int]) -> None:
             "<h4>Token Usage</h4>"
             f"<p>prompt={prompt_tokens} | completion={completion_tokens} | total={total_tokens}</p>"
             "</div>"
+        ),
+        unsafe_allow_html = True,
+    )
+
+
+def render_reasoning_block(st, reasoning_text: str) -> None:
+    """Render a simple collapsible reasoning block.
+
+    Args:
+        st: Imported Streamlit module.
+        reasoning_text: Extracted reasoning text from model output.
+    """
+    content = reasoning_text.strip()
+    if not content:
+        return
+
+    escaped = html.escape(content)
+    st.markdown(
+        (
+            "<details>"
+            "<summary><b>Reasoning</b></summary>"
+            f"<div style='margin-top: 8px; white-space: pre-wrap;'>{escaped}</div>"
+            "</details>"
         ),
         unsafe_allow_html = True,
     )
@@ -292,6 +321,92 @@ def build_conversation_history(messages: list[dict[str, str]]) -> list[dict[str,
     return history
 
 
+def build_model_options(
+    profile,
+    preferred_model: str = "",
+) -> list[str]:
+    """Build model options for one profile with optional preferred item.
+
+    Args:
+        profile: Active provider profile object.
+        preferred_model: Optional model name to be pinned in options.
+    """
+    options = list_profile_models(profile = profile)
+    normalized_preferred = preferred_model.strip()
+
+    if normalized_preferred and normalized_preferred not in options:
+        options = [normalized_preferred] + options
+
+    if not options and profile.default_model:
+        options = [profile.default_model]
+    return options
+
+
+def resolve_selected_model(
+    st,
+    profile,
+    initial_profile_id: str,
+    initial_model: str,
+) -> str:
+    """Resolve effective model from preset and optional custom override.
+
+    Args:
+        st: Imported Streamlit module.
+        profile: Selected provider profile object.
+        initial_profile_id: Profile id from startup arguments.
+        initial_model: Model name resolved during startup.
+    """
+    base_model = initial_model if profile.profile_id == initial_profile_id else profile.default_model
+    model_options = build_model_options(
+        profile = profile,
+        preferred_model = base_model,
+    )
+    option_state_key = f"streamlit_model_option_{profile.profile_id}"
+    custom_state_key = f"streamlit_custom_model_{profile.profile_id}"
+
+    if option_state_key not in st.session_state:
+        st.session_state[option_state_key] = model_options[0] if model_options else base_model
+    if custom_state_key not in st.session_state:
+        st.session_state[custom_state_key] = ""
+    if model_options and st.session_state[option_state_key] not in model_options:
+        st.session_state[option_state_key] = model_options[0]
+
+    st.selectbox(
+        "Model",
+        options = model_options,
+        key = option_state_key,
+    )
+    st.text_input(
+        "Custom model (optional)",
+        key = custom_state_key,
+        placeholder = "Leave empty to use selected preset model",
+    )
+
+    custom_model = str(st.session_state[custom_state_key]).strip()
+    if custom_model:
+        return custom_model
+    return str(st.session_state[option_state_key]).strip()
+
+
+def resolve_thinking_enabled(st, profile) -> bool:
+    """Resolve current thinking switch value for selected provider.
+
+    Args:
+        st: Imported Streamlit module.
+        profile: Selected provider profile object.
+    """
+    state_key = f"streamlit_thinking_{profile.profile_id}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = bool(profile.enable_deep_thinking)
+
+    st.checkbox(
+        "Thinking",
+        key = state_key,
+        help = "Enable provider deep thinking mode for current provider.",
+    )
+    return bool(st.session_state[state_key])
+
+
 def main() -> None:
     """Run Streamlit web app.
 
@@ -304,7 +419,11 @@ def main() -> None:
     load_env_file(env_path = args.env_path)
     registry = load_profiles(profiles_path = args.profiles_path)
     initial_profile = resolve_profile(registry = registry, cli_profile = args.profile)
-    initial_model = resolve_model(profile = initial_profile, cli_model = args.model)
+    initial_model = resolve_model(
+        profile = initial_profile,
+        cli_model = args.model,
+        prefer_profile_default = bool(args.profile),
+    )
 
     st.set_page_config(
         page_title = "llm-lab",
@@ -319,18 +438,24 @@ def main() -> None:
 
     with st.sidebar:
         st.markdown("### Control Center")
-        st.caption("Switch profile, model, sampling, and persistence options.")
+        st.caption("Switch model provider, model, thinking, sampling, and persistence options.")
 
         selected_profile_id = st.selectbox(
-            "Profile",
+            "Model Provider",
             options = profile_options,
             index = default_profile_index,
         )
         selected_profile = registry.profiles[selected_profile_id]
 
-        selected_model = st.text_input(
-            "Model",
-            value = initial_model if selected_profile_id == initial_profile.profile_id else selected_profile.default_model,
+        selected_model = resolve_selected_model(
+            st = st,
+            profile = selected_profile,
+            initial_profile_id = initial_profile.profile_id,
+            initial_model = initial_model,
+        )
+        thinking_enabled = resolve_thinking_enabled(
+            st = st,
+            profile = selected_profile,
         )
         stream_mode = st.checkbox("Stream response", value = False)
         save_session_enabled = st.checkbox(
@@ -350,6 +475,7 @@ def main() -> None:
         profile_id = selected_profile_id,
         model_name = selected_model,
         stream_mode = stream_mode,
+        thinking_enabled = thinking_enabled,
         temperature = temperature,
         top_p = top_p,
     )
@@ -378,6 +504,11 @@ def main() -> None:
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            if message["role"] == "assistant":
+                render_reasoning_block(
+                    st = st,
+                    reasoning_text = str(message.get("reasoning", "")),
+                )
 
     if "last_usage" not in st.session_state:
         st.session_state.last_usage = {}
@@ -406,9 +537,11 @@ def main() -> None:
     )
 
     with st.chat_message("assistant"):
+        warning_messages: list[str] = []
         if stream_mode:
             placeholder = st.empty()
             full_text = ""
+            reasoning_text = ""
             try:
                 request = ChatRequest(
                     user_text = prompt,
@@ -423,13 +556,24 @@ def main() -> None:
                     request = request,
                     profile = selected_profile,
                     model = selected_model,
+                    warning_messages = warning_messages,
+                    enable_deep_thinking = thinking_enabled,
                 ):
                     full_text += chunk
                     placeholder.markdown(full_text)
+                assistant_text, reasoning_text = separate_reasoning_text(
+                    assistant_text = full_text,
+                )
+                if assistant_text != full_text:
+                    placeholder.markdown(assistant_text if assistant_text else "(empty response)")
+                for warning_message in warning_messages:
+                    st.warning(warning_message)
+                render_reasoning_block(st = st, reasoning_text = reasoning_text)
             except Exception as exc:
                 full_text = f"[ERROR] {exc}"
                 placeholder.error(full_text)
-            assistant_text = full_text
+                assistant_text = full_text
+                reasoning_text = ""
             usage = {}
         else:
             request = ChatRequest(
@@ -441,26 +585,45 @@ def main() -> None:
                 temperature = temperature,
                 top_p = top_p,
             )
-            response = send_chat(
-                request = request,
-                profile = selected_profile,
-                model = selected_model,
-            )
-            assistant_text = response.assistant_text or f"[ERROR] {response.error_message}"
+            with st.spinner("Reasoning..."):
+                response = send_chat(
+                    request = request,
+                    profile = selected_profile,
+                    model = selected_model,
+                    enable_deep_thinking = thinking_enabled,
+                )
+            assistant_text = response.assistant_text
+            if response.error_message:
+                assistant_text = f"[ERROR] {response.error_message}"
+            reasoning_text = response.reasoning_text
             usage = response.usage
+            warning_messages = response.warning_messages
             if response.error_message:
                 st.error(assistant_text)
             else:
+                for warning_message in warning_messages:
+                    st.warning(warning_message)
                 st.markdown(assistant_text)
+                render_reasoning_block(st = st, reasoning_text = reasoning_text)
                 render_usage_card(st = st, usage = usage)
 
-    st.session_state.messages.append({"role": "assistant", "content": assistant_text})
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": assistant_text,
+            "reasoning": reasoning_text,
+        }
+    )
     st.session_state.last_usage = usage
     append_message(
         session = st.session_state.session_payload,
         role = "assistant",
         content = assistant_text,
-        metadata = {"usage": usage},
+        metadata = {
+            "usage": usage,
+            "reasoning": reasoning_text,
+            "warnings": warning_messages,
+        },
     )
 
     if save_session_enabled:
