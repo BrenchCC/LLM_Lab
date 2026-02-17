@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from service import chat_service
-from service.chat_service import ChatRequest, send_chat
+from service.chat_service import ChatRequest, send_chat, separate_reasoning_text
 from utils.config_loader import ModelCapabilities, ProviderProfile
 
 
@@ -170,6 +170,29 @@ class StreamFallbackThinkingCompletions:
         return [chunk]
 
 
+class StreamReasoningFieldCompletions:
+    """Fake stream completions carrying reasoning in dedicated delta fields."""
+
+    def create(self, **kwargs):
+        """Return stream chunks with reasoning field tokens then answer tokens.
+
+        Args:
+            kwargs: Completion request keyword arguments.
+        """
+        _ = kwargs
+        return [
+            SimpleNamespace(
+                choices = [SimpleNamespace(delta = SimpleNamespace(reasoning_content = "先判断需求，"))]
+            ),
+            SimpleNamespace(
+                choices = [SimpleNamespace(delta = SimpleNamespace(reasoning_content = "再给出步骤。"))]
+            ),
+            SimpleNamespace(
+                choices = [SimpleNamespace(delta = SimpleNamespace(content = "最终答案"))]
+            ),
+        ]
+
+
 class FakeClient:
     """Fake OpenAI-compatible client for chat service tests."""
 
@@ -243,6 +266,20 @@ class StreamFallbackThinkingClient:
         """
         self.chat = SimpleNamespace(
             completions = StreamFallbackThinkingCompletions(tracker = tracker)
+        )
+
+
+class StreamReasoningFieldClient:
+    """Fake client for stream reasoning-field extraction tests."""
+
+    def __init__(self):
+        """Initialize fake nested API attributes.
+
+        Args:
+            self: Fake client instance.
+        """
+        self.chat = SimpleNamespace(
+            completions = StreamReasoningFieldCompletions()
         )
 
 
@@ -612,3 +649,40 @@ def test_stream_chat_can_disable_deep_thinking_by_runtime_override(monkeypatch) 
     assert len(calls) == 1
     assert "extra_body" not in calls[0]
     assert not warning_messages
+
+
+def test_stream_chat_extracts_reasoning_from_dedicated_delta_fields(monkeypatch) -> None:
+    """Verify stream mode can extract reasoning from non-content delta fields.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        chat_service,
+        "build_client",
+        lambda profile: StreamReasoningFieldClient(),
+    )
+    monkeypatch.setattr(
+        chat_service,
+        "resolve_capabilities",
+        lambda profile, model, client: ModelCapabilities(
+            supports_text = True,
+            supports_image = True,
+            supports_video = False,
+            supports_audio = False,
+        ),
+    )
+
+    chunks = list(
+        chat_service.stream_chat(
+            request = ChatRequest(user_text = "hello", stream = True),
+            profile = build_profile(),
+            model = "test-model",
+        )
+    )
+
+    raw_text = "".join(chunks)
+    assistant_text, reasoning_text = separate_reasoning_text(assistant_text = raw_text)
+
+    assert assistant_text == "最终答案"
+    assert reasoning_text == "先判断需求，再给出步骤。"

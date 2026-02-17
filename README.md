@@ -10,6 +10,7 @@
     <img src="https://img.shields.io/badge/OpenAI-API-green?style=flat-square&logo=openai" alt="OpenAI API">
     <img src="https://img.shields.io/badge/Streamlit-WebUI-red?style=flat-square&logo=streamlit" alt="Streamlit">
     <img src="https://img.shields.io/badge/Gradio-WebUI-orange?style=flat-square&logo=gradio" alt="Gradio">
+    <img src="https://img.shields.io/badge/FastAPI-WebUI-009688?style=flat-square&logo=fastapi" alt="FastAPI">
     <img src="https://img.shields.io/badge/Multimodal-Support-purple?style=flat-square&logo=ai" alt="Multimodal">
     <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square&logo=opensourceinitiative" alt="License">
   </div>
@@ -21,13 +22,13 @@
 
 ---
 
-## 🎯 产品亮点
+## 🎯 项目亮点
 
 ### 核心优势
 - **单入口命令**: 只需 `llm-lab` 一个命令，统一所有交互
 - **多种交互方式**:
   - **CLI**: 基于 Rich 的美观终端界面，支持流式输出
-  - **WebUI**: 提供 Streamlit 和 Gradio 两种现代化界面
+  - **WebUI**: 提供 Streamlit、Gradio、FastAPI(HTML) 三种现代化界面
 - **智能配置管理**: 多 Profile 管理，快速切换不同模型和服务商
 - **多模态支持**:
   - 🖼️ 图片直传
@@ -45,9 +46,11 @@ flowchart TD
     B -->|web| D[WebUI]
     D -->|streamlit| E[Streamlit 界面]
     D -->|gradio| F[Gradio 界面]
+    D -->|fastapi| O[FastAPI + HTML 界面]
     C --> G[加载 .env 与 profiles.yaml]
     E --> G
     F --> G
+    O --> G
     G --> H[构建 OpenAI 兼容客户端]
     H --> I{输入类型}
     I -->|文本| J[Chat Completion]
@@ -263,6 +266,9 @@ llm-lab web --ui streamlit --host 127.0.0.1 --port 8501
 
 # Gradio 界面（默认 7860 端口）
 llm-lab web --ui gradio --host 127.0.0.1 --port 7860
+
+# FastAPI + HTML 界面（默认 8000 端口）
+llm-lab web --ui fastapi --host 127.0.0.1 --port 8000
 ```
 
 ---

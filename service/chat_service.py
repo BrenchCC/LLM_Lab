@@ -145,6 +145,83 @@ def normalize_message_text(content: Any) -> str:
     return str(content) if content is not None else ""
 
 
+def normalize_stream_text_piece(content: Any) -> str:
+    """Normalize one streaming delta payload into raw text piece.
+
+    Args:
+        content: Streaming delta payload object.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            parts.append(normalize_stream_text_piece(content = item))
+        return "".join(parts)
+
+    text_candidate = read_message_field(content, "text")
+    if isinstance(text_candidate, str):
+        return text_candidate
+    content_candidate = read_message_field(content, "content")
+    if isinstance(content_candidate, str):
+        return content_candidate
+    summary_candidate = read_message_field(content, "summary")
+    if isinstance(summary_candidate, str):
+        return summary_candidate
+
+    return str(content)
+
+
+def extract_stream_delta_texts(delta: Any) -> tuple[str, str]:
+    """Extract answer and reasoning text from one streaming delta payload.
+
+    Args:
+        delta: One delta object from streamed completion chunk.
+    """
+    answer_parts: list[str] = []
+    reasoning_parts: list[str] = []
+
+    content = read_message_field(delta, "content")
+    if isinstance(content, list):
+        for item in content:
+            if is_reasoning_item(content_item = item):
+                reasoning_piece = normalize_stream_text_piece(
+                    content = (
+                        read_message_field(item, "text")
+                        or read_message_field(item, "content")
+                        or read_message_field(item, "summary")
+                    )
+                )
+                if reasoning_piece:
+                    reasoning_parts.append(reasoning_piece)
+                continue
+
+            answer_piece = normalize_stream_text_piece(content = item)
+            if answer_piece:
+                answer_parts.append(answer_piece)
+    elif content is not None:
+        if is_reasoning_item(content_item = content):
+            reasoning_piece = normalize_stream_text_piece(content = content)
+            if reasoning_piece:
+                reasoning_parts.append(reasoning_piece)
+        else:
+            answer_piece = normalize_stream_text_piece(content = content)
+            if answer_piece:
+                answer_parts.append(answer_piece)
+
+    for field_name in ["reasoning_content", "reasoning", "thinking", "analysis", "reasoning_text"]:
+        field_value = read_message_field(delta, field_name)
+        reasoning_piece = normalize_stream_text_piece(content = field_value)
+        if reasoning_piece:
+            reasoning_parts.append(reasoning_piece)
+
+    answer_text = "".join(answer_parts)
+    reasoning_text = "".join(reasoning_parts)
+    return answer_text, reasoning_text
+
+
 def normalize_reasoning_payload(content: Any) -> str:
     """Normalize arbitrary reasoning payload object into plain text.
 
@@ -632,11 +709,25 @@ def stream_chat(
     if warning_messages is not None and stream_warnings:
         warning_messages.extend(stream_warnings)
 
+    in_reasoning_block = False
+
     for chunk in stream_response:
         if not getattr(chunk, "choices", None):
             continue
         delta = chunk.choices[0].delta
-        content = getattr(delta, "content", None)
-        if content is None:
-            continue
-        yield normalize_message_text(content = content)
+        answer_text, reasoning_text = extract_stream_delta_texts(delta = delta)
+
+        if reasoning_text:
+            if not in_reasoning_block:
+                yield "<think>"
+                in_reasoning_block = True
+            yield reasoning_text
+
+        if answer_text:
+            if in_reasoning_block:
+                yield "</think>"
+                in_reasoning_block = False
+            yield answer_text
+
+    if in_reasoning_block:
+        yield "</think>"

@@ -32,6 +32,7 @@ setup(
     ),
     include_package_data = True,
     install_requires = [
+        "fastapi>=0.115.0",
         "gradio>=5.0.0",
         "openai>=1.55.0",
         "pydantic>=2.10.0",
@@ -41,6 +42,7 @@ setup(
         "streamlit>=1.40.0",
         "python-dotenv>=1.0.1",
         "opencv-python-headless>=4.10.0.84",
+        "uvicorn>=0.30.0",
     ],
     extras_require = {
         "dev": [

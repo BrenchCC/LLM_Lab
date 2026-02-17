@@ -383,7 +383,7 @@ def build_chatbot_component(gr):
         gr: Imported Gradio module.
     """
     base_kwargs = {
-        "label": "Conversation",
+        "label": "LLM-LAB Conversation",
         "height": 560,
     }
     chatbot_signature = inspect.signature(gr.Chatbot.__init__)
@@ -411,7 +411,7 @@ def build_chatbot_component(gr):
         except TypeError:
             continue
 
-    return gr.Chatbot(label = "Conversation"), "messages"
+    return gr.Chatbot(label = "LLM-LAB Conversation"), "messages"
 
 
 def history_to_messages(history) -> list[dict[str, str]]:
@@ -847,7 +847,7 @@ def run_gradio_app(
     )
 
     blocks_kwargs = {
-        "title": "llm-lab Gradio UI",
+        "title": "LLM-LAB",
         "css": GRADIO_CSS,
         "head": GRADIO_HEAD,
     }
@@ -858,11 +858,11 @@ def run_gradio_app(
         gr.HTML(
             """
             <section class="llm-hero">
-              <div class="kicker">LLM Lab Interface</div>
-              <h2>Multimodal Prompt Playground</h2>
+              <div class="kicker">LLM-LAB</div>
+              <h2>LLM-LAB</h2>
               <p>
-                Test OpenAI-compatible models with clean controls for profile switching,
-                media upload, and session replay.
+                LLM-LAB unified theme for OpenAI-compatible services with clean controls
+                for profile switching, media upload, and session replay.
               </p>
             </section>
             """
@@ -870,7 +870,7 @@ def run_gradio_app(
 
         with gr.Row():
             with gr.Column(scale = 3, elem_classes = ["control-panel"]):
-                gr.Markdown("### Control Center")
+                gr.Markdown("### LLM-LAB Theme Console")
                 profile_dropdown = gr.Dropdown(
                     label = "Model Provider",
                     choices = profile_options,

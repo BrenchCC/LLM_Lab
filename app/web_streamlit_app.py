@@ -160,11 +160,11 @@ def render_hero(st) -> None:
     st.markdown(
         """
         <div class="llm-hero">
-          <div class="kicker">LLM Lab Interface</div>
-          <h1>Multimodal Prompt Playground</h1>
+          <div class="kicker">LLM-LAB</div>
+          <h1>LLM-LAB</h1>
           <p>
-            Run side-by-side experiments for OpenAI-compatible models with a clear,
-            visual workflow across text, image, and video prompts.
+            Unified model lab for OpenAI-compatible services with a clear workflow
+            across text, image, and video prompts.
           </p>
         </div>
         """,
@@ -426,7 +426,7 @@ def main() -> None:
     )
 
     st.set_page_config(
-        page_title = "llm-lab",
+        page_title = "LLM-LAB",
         layout = "wide",
         initial_sidebar_state = "expanded",
     )
@@ -437,8 +437,8 @@ def main() -> None:
     default_profile_index = profile_options.index(initial_profile.profile_id)
 
     with st.sidebar:
-        st.markdown("### Control Center")
-        st.caption("Switch model provider, model, thinking, sampling, and persistence options.")
+        st.markdown("### LLM-LAB Theme Console")
+        st.caption("LLM-LAB unified theme for provider/model switching, sampling, and session persistence.")
 
         selected_profile_id = st.selectbox(
             "Model Provider",
@@ -480,7 +480,7 @@ def main() -> None:
         top_p = top_p,
     )
 
-    st.markdown("### Attachments")
+    st.markdown("### LLM-LAB Attachments")
     upload_col, video_col = st.columns(2, gap = "large")
     with upload_col:
         uploaded_images = st.file_uploader(
@@ -500,7 +500,7 @@ def main() -> None:
     if uploaded_video:
         st.caption(f"Video attached: {uploaded_video.name}")
 
-    st.markdown("### Conversation")
+    st.markdown("### LLM-LAB Conversation")
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])

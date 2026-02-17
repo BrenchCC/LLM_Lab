@@ -22,7 +22,7 @@ profiles:
     default_model: qwen-max
     models:
       - qwen-max
-      - qwen-plus
+      - qwen3.5-plus
     timeout_seconds: 60
     enable_deep_thinking: false
     capabilities:
@@ -34,10 +34,10 @@ profiles:
   kimi_moonshot:
     base_url: https://api.moonshot.cn/v1
     api_key_env: KIMI_API_KEY
-    default_model: moonshot-v1-8k
+    default_model: kimi-k2.5
     models:
-      - moonshot-v1-8k
-      - moonshot-v1-32k
+      - kimi-k2.5
+      - kimi-k2-thinking
     timeout_seconds: 60
     enable_deep_thinking: false
     capabilities:
@@ -86,7 +86,7 @@ profiles:
     api_key_env: DEEPSEEK_API_KEY
     default_model: deepseek-chat
     models:
-      - deepseek-chat
+      - deepseek-
       - deepseek-reasoner
     timeout_seconds: 60
     enable_deep_thinking: false
@@ -99,10 +99,10 @@ profiles:
   glm_default:
     base_url: https://open.bigmodel.cn/api/paas/v4
     api_key_env: GLM_API_KEY
-    default_model: glm-4-flash
+    default_model: glm-4.7
     models:
-      - glm-4-flash
-      - glm-4-plus
+      - glm-4.7
+      - glm-5
     timeout_seconds: 60
     enable_deep_thinking: false
     capabilities:

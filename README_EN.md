@@ -10,6 +10,7 @@
     <img src="https://img.shields.io/badge/OpenAI-API-green?style=flat-square&logo=openai" alt="OpenAI API">
     <img src="https://img.shields.io/badge/Streamlit-WebUI-red?style=flat-square&logo=streamlit" alt="Streamlit">
     <img src="https://img.shields.io/badge/Gradio-WebUI-orange?style=flat-square&logo=gradio" alt="Gradio">
+    <img src="https://img.shields.io/badge/FastAPI-WebUI-009688?style=flat-square&logo=fastapi" alt="FastAPI">
     <img src="https://img.shields.io/badge/Multimodal-Support-purple?style=flat-square&logo=ai" alt="Multimodal">
     <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square&logo=opensourceinitiative" alt="License">
   </div>
@@ -27,7 +28,7 @@
 - **Single command entry**: Just `llm-lab` to unify all interactions
 - **Multiple interaction modes**:
   - **CLI**: Beautiful Rich-powered terminal UI with streaming support
-  - **WebUI**: Modern interfaces with Streamlit and Gradio options
+  - **WebUI**: Modern interfaces with Streamlit, Gradio, and FastAPI (HTML)
 - **Intelligent configuration**: Multi-profile management for quick model/service switching
 - **Multimodal support**:
   - 🖼️ Direct image upload
@@ -45,9 +46,11 @@ flowchart TD
     B -->|web| D[WebUI]
     D -->|streamlit| E[Streamlit Interface]
     D -->|gradio| F[Gradio Interface]
+    D -->|fastapi| O[FastAPI + HTML Interface]
     C --> G[Load .env and profiles.yaml]
     E --> G
     F --> G
+    O --> G
     G --> H[Build OpenAI-compatible Client]
     H --> I{Input Type}
     I -->|Text| J[Chat Completion]
@@ -264,6 +267,9 @@ llm-lab web --ui streamlit --host 127.0.0.1 --port 8501
 
 # Gradio interface (default port 7860)
 llm-lab web --ui gradio --host 127.0.0.1 --port 7860
+
+# FastAPI + HTML interface (default port 8000)
+llm-lab web --ui fastapi --host 127.0.0.1 --port 8000
 ```
 
 ---

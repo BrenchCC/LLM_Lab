@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     web_parser.add_argument(
         "--ui",
         type = str,
-        choices = ["streamlit", "gradio"],
+        choices = ["streamlit", "gradio", "fastapi"],
         default = "streamlit",
         help = "Web UI type (default: streamlit).",
     )
