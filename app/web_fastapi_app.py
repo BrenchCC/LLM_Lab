@@ -262,6 +262,14 @@ def create_fastapi_app(
         redoc_url = None,
     )
 
+    # 挂载静态文件目录
+    from fastapi.staticfiles import StaticFiles
+    import os
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(app_dir)
+    assets_path = os.path.join(project_root, "assets")
+    app.mount("/assets", StaticFiles(directory = assets_path), name = "assets")
+
     @app.get("/", response_class = HTMLResponse)
     def render_home_page() -> HTMLResponse:
         """Render FastAPI web page.
